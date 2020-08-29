@@ -50,6 +50,7 @@ System::System(const string &strVocFile, const string &strSettingsFile, const eS
         cout << "RGB-D" << endl;
 
     //Check settings file
+    // 检查相机内参文件
     cv::FileStorage fsSettings(strSettingsFile.c_str(), cv::FileStorage::READ);
     if(!fsSettings.isOpened())
     {
@@ -59,6 +60,7 @@ System::System(const string &strVocFile, const string &strSettingsFile, const eS
 
 
     //Load ORB Vocabulary
+    // 加载ORB词典
     cout << endl << "Loading ORB Vocabulary. This could take a while..." << endl;
 
     mpVocabulary = new ORBVocabulary();
@@ -72,37 +74,45 @@ System::System(const string &strVocFile, const string &strSettingsFile, const eS
     cout << "Vocabulary loaded!" << endl << endl;
 
     //Create KeyFrame Database
+    // 创建KF数据库，这里实际上是引用传递
     mpKeyFrameDatabase = new KeyFrameDatabase(*mpVocabulary);
 
     //Create the Map
+    // 创建地图对象
     mpMap = new Map();
 
     //Create Drawers. These are used by the Viewer
+    // 创建显示窗口，显示frame和map
     mpFrameDrawer = new FrameDrawer(mpMap);
     mpMapDrawer = new MapDrawer(mpMap, strSettingsFile);
 
     //Initialize the Tracking thread
     //(it will live in the main thread of execution, the one that called this constructor)
+    // 创建三个线程，指针传递
     mpTracker = new Tracking(this, mpVocabulary, mpFrameDrawer, mpMapDrawer,
                              mpMap, mpKeyFrameDatabase, strSettingsFile, mSensor);
 
     //Initialize the Local Mapping thread and launch
+    // Localmapping::Run调用
     mpLocalMapper = new LocalMapping(mpMap, mSensor==MONOCULAR);
     mptLocalMapping = new thread(&ORB_SLAM2::LocalMapping::Run,mpLocalMapper);
 
     //Initialize the Loop Closing thread and launch
+    // LoopClosing
     mpLoopCloser = new LoopClosing(mpMap, mpKeyFrameDatabase, mpVocabulary, mSensor!=MONOCULAR);
     mptLoopClosing = new thread(&ORB_SLAM2::LoopClosing::Run, mpLoopCloser);
 
     //Initialize the Viewer thread and launch
     if(bUseViewer)
     {
+        //传入参数：this,图片显示，地图显示，跟踪对象，相机内参
         mpViewer = new Viewer(this, mpFrameDrawer,mpMapDrawer,mpTracker,strSettingsFile);
         mptViewer = new thread(&Viewer::Run, mpViewer);
         mpTracker->SetViewer(mpViewer);
     }
 
     //Set pointers between threads
+    //跟踪、局部地图、全局地图之间的互相联系
     mpTracker->SetLocalMapper(mpLocalMapper);
     mpTracker->SetLoopClosing(mpLoopCloser);
 
@@ -163,9 +173,10 @@ cv::Mat System::TrackStereo(const cv::Mat &imLeft, const cv::Mat &imRight, const
     mTrackedKeyPointsUn = mpTracker->mCurrentFrame.mvKeysUn;
     return Tcw;
 }
-
+// Tracking线程的RGBD图像处理程序
 cv::Mat System::TrackRGBD(const cv::Mat &im, const cv::Mat &depthmap, const double &timestamp)
 {
+    // 传感器是否为RGBD
     if(mSensor!=RGBD)
     {
         cerr << "ERROR: you called TrackRGBD but input sensor was not set to RGBD." << endl;
@@ -173,6 +184,7 @@ cv::Mat System::TrackRGBD(const cv::Mat &im, const cv::Mat &depthmap, const doub
     }    
 
     // Check mode change
+    // 检测SLAM模式的改变
     {
         unique_lock<mutex> lock(mMutexMode);
         if(mbActivateLocalizationMode)
@@ -197,6 +209,7 @@ cv::Mat System::TrackRGBD(const cv::Mat &im, const cv::Mat &depthmap, const doub
     }
 
     // Check reset
+    // 检测是否需要重置
     {
     unique_lock<mutex> lock(mMutexReset);
     if(mbReset)
@@ -205,9 +218,9 @@ cv::Mat System::TrackRGBD(const cv::Mat &im, const cv::Mat &depthmap, const doub
         mbReset = false;
     }
     }
-
+    // 调用tracking GrabImageRGBD，将图像送入Tracking
     cv::Mat Tcw = mpTracker->GrabImageRGBD(im,depthmap,timestamp);
-
+    // 当前的跟踪状态和跟踪到的地图点，关键点
     unique_lock<mutex> lock2(mMutexState);
     mTrackingState = mpTracker->mState;
     mTrackedMapPoints = mpTracker->mCurrentFrame.mvpMapPoints;

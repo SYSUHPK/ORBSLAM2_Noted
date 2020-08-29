@@ -58,17 +58,21 @@ void LocalMapping::Run()
         if(CheckNewKeyFrames())
         {
             // BoW conversion and insertion in Map
+            // 处理新的关键帧（计算BOW向量并将关键帧插入地图）
             ProcessNewKeyFrame();
 
             // Check recent MapPoints
+            // 检查最近添加的地图点，剔除不符合要求的点
             MapPointCulling();
 
             // Triangulate new MapPoints
+            // 三角化新添加的地图点
             CreateNewMapPoints();
 
             if(!CheckNewKeyFrames())
             {
                 // Find more matches in neighbor keyframes and fuse point duplications
+                // 在邻近关键帧中寻找更多的匹配（新地图点－邻近关键帧）
                 SearchInNeighbors();
             }
 
@@ -81,6 +85,7 @@ void LocalMapping::Run()
                     Optimizer::LocalBundleAdjustment(mpCurrentKeyFrame,&mbAbortBA, mpMap);
 
                 // Check redundant local Keyframes
+                // 删除冗余关键帧
                 KeyFrameCulling();
             }
 
@@ -127,6 +132,7 @@ bool LocalMapping::CheckNewKeyFrames()
 
 void LocalMapping::ProcessNewKeyFrame()
 {
+    //锁住程序块，保证在取关键帧的过程中mlNerKeyFrames不进行操作
     {
         unique_lock<mutex> lock(mMutexNewKFs);
         mpCurrentKeyFrame = mlNewKeyFrames.front();
@@ -134,9 +140,11 @@ void LocalMapping::ProcessNewKeyFrame()
     }
 
     // Compute Bags of Words structures
+    // 计算关键帧的BOW描述子
     mpCurrentKeyFrame->ComputeBoW();
 
     // Associate MapPoints to the new keyframe and update normal and descriptor
+    // 地图点与关键帧关联
     const vector<MapPoint*> vpMapPointMatches = mpCurrentKeyFrame->GetMapPointMatches();
 
     for(size_t i=0; i<vpMapPointMatches.size(); i++)
@@ -146,6 +154,7 @@ void LocalMapping::ProcessNewKeyFrame()
         {
             if(!pMP->isBad())
             {
+                // 假如该地图点没有被当前帧观察到
                 if(!pMP->IsInKeyFrame(mpCurrentKeyFrame))
                 {
                     pMP->AddObservation(mpCurrentKeyFrame, i);
@@ -161,12 +170,14 @@ void LocalMapping::ProcessNewKeyFrame()
     }    
 
     // Update links in the Covisibility Graph
+    // 更新covisibility graph中的连接关系
     mpCurrentKeyFrame->UpdateConnections();
 
     // Insert Keyframe in Map
+    // 插入关键帧
     mpMap->AddKeyFrame(mpCurrentKeyFrame);
 }
-
+// 筛选地图点
 void LocalMapping::MapPointCulling()
 {
     // Check Recent Added MapPoints
@@ -183,20 +194,24 @@ void LocalMapping::MapPointCulling()
     while(lit!=mlpRecentAddedMapPoints.end())
     {
         MapPoint* pMP = *lit;
+        // 坏点
         if(pMP->isBad())
         {
             lit = mlpRecentAddedMapPoints.erase(lit);
         }
+        // 被观测到的概率小于２５％
         else if(pMP->GetFoundRatio()<0.25f )
         {
             pMP->SetBadFlag();
             lit = mlpRecentAddedMapPoints.erase(lit);
         }
+        // 未被两个关键帧看到且首次看到该点的关键帧和当前帧ID相差２
         else if(((int)nCurrentKFid-(int)pMP->mnFirstKFid)>=2 && pMP->Observations()<=cnThObs)
         {
             pMP->SetBadFlag();
             lit = mlpRecentAddedMapPoints.erase(lit);
         }
+        // 当前关键帧和首次看到该点帧ＩＤ相差超过3
         else if(((int)nCurrentKFid-(int)pMP->mnFirstKFid)>=3)
             lit = mlpRecentAddedMapPoints.erase(lit);
         else
@@ -204,6 +219,7 @@ void LocalMapping::MapPointCulling()
     }
 }
 
+// 在covisibility graph 上寻找有共视关系的关键帧（10帧）
 void LocalMapping::CreateNewMapPoints()
 {
     // Retrieve neighbor keyframes in covisibility graph
@@ -234,6 +250,7 @@ void LocalMapping::CreateNewMapPoints()
     int nnew=0;
 
     // Search matches with epipolar restriction and triangulate
+    // 计算当前帧和共视关键帧的对极约束并三角化地图点
     for(size_t i=0; i<vpNeighKFs.size(); i++)
     {
         if(i>0 && CheckNewKeyFrames())
@@ -242,6 +259,7 @@ void LocalMapping::CreateNewMapPoints()
         KeyFrame* pKF2 = vpNeighKFs[i];
 
         // Check first that baseline is not too short
+        // 检查基线是否满足要求
         cv::Mat Ow2 = pKF2->GetCameraCenter();
         cv::Mat vBaseline = Ow2-Ow1;
         const float baseline = cv::norm(vBaseline);
@@ -261,6 +279,7 @@ void LocalMapping::CreateNewMapPoints()
         }
 
         // Compute Fundamental Matrix
+        // 计算基础矩阵
         cv::Mat F12 = ComputeF12(mpCurrentKeyFrame,pKF2);
 
         // Search matches that fullfil epipolar constraint
@@ -360,6 +379,7 @@ void LocalMapping::CreateNewMapPoints()
                 continue;
 
             //Check reprojection error in first keyframe
+            // 计算重投影误差，如果大于一定值直接抛弃
             const float &sigmaSquare1 = mpCurrentKeyFrame->mvLevelSigma2[kp1.octave];
             const float x1 = Rcw1.row(0).dot(x3Dt)+tcw1.at<float>(0);
             const float y1 = Rcw1.row(1).dot(x3Dt)+tcw1.at<float>(1);
@@ -413,6 +433,7 @@ void LocalMapping::CreateNewMapPoints()
             }
 
             //Check scale consistency
+            // 检查尺度一致性
             cv::Mat normal1 = x3D-Ow1;
             float dist1 = cv::norm(normal1);
 
